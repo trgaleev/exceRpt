@@ -119,6 +119,7 @@ ifeq ($(LOCAL_EXECUTION),true)
 	JAVA_EXE              := /usr/bin/java
 	FASTX_CLIP_EXE        := $(EXE_DIR)/fastx_0.0.14/bin/fastx_clipper
 	FASTX_FILTER_EXE      := $(EXE_DIR)/fastx_0.0.14/bin/fastq_quality_filter
+	CUTADAPT_EXE          := ~/.local/bin/cutadapt
 	#VIENNA_PATH          := $(EXE_DIR)/ViennaRNA_2.1.5/bin
 	BOWTIE2_EXE           := $(EXE_DIR)/bowtie2-2.2.4/bowtie2
 	#SAMTOOLS_EXE          := $(EXE_DIR)/samtools-1.1/samtools
@@ -299,21 +300,24 @@ endif
 #else ifeq ($(ADAPTER_SEQ),guessKnown)
 ifeq ($(ADAPTER_SEQ),guessKnown)
 	COMMAND_WRITE_ADAPTER_SEQ := $(COMMAND_CONVERT_SRA) 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err | $(JAVA_EXE) -Xmx$(JAVA_RAM) -jar $(EXCERPT_TOOLS_EXE) FindAdapter -n 10000 -m 1000000 -s 4 -a $(DATABASE_PATH)/adapters/adapters.fa - > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).log
-	LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Identifying 3' adapter from list of known sequences.  Removing 3' adapter sequence using fastX:\n
+	#LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Identifying 3' adapter from list of known sequences.  Removing 3' adapter sequence using fastX:\n
+	LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Identifying 3' adapter from list of known sequences.  Removing 3' adapter sequence using cutadapt:\n
 else ifeq ($(ADAPTER_SEQ),none)
 	COMMAND_WRITE_ADAPTER_SEQ := echo 'no adapter' > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq;
 	COMMAND_CLIP_ADAPTER := $(COMMAND_CONVERT_SRA) | gzip -c > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err;  gunzip -c $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz | wc -l | awk '{print "input\t"$$0/4"\nsuccessfully_clipped\tNA"}' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
 	LOGENTRY_WRITE_ADAPTER := Provided 3' adapter clipped input sequence file. No clipping necessary.\n 
 else
 	COMMAND_WRITE_ADAPTER_SEQ := echo $(ADAPTER_SEQ) > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq
-	LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Provided 3' adapter sequence. Removing 3' adapter sequence using fastX:\n
+	#LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Provided 3' adapter sequence. Removing 3' adapter sequence using fastX:\n
+	LOGENTRY_WRITE_ADAPTER := $(ts) $(PIPELINE_NAME): Provided 3' adapter sequence. Removing 3' adapter sequence using cutadapt:\n
 endif
 
 
 ## If no adapter clipping command has been set- use this one:
-COMMAND_CLIP_ADAPTER ?= $(COMMAND_CONVERT_SRA) > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp; $(FASTX_CLIP_EXE) $(FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE) -Q$(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).qualityEncoding) -a $(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq) -l $(MIN_READ_LENGTH) -v -n -M $(MIN_ADAPTER_BASES_3p) -i $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp -z -o $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz >> $(OUTPUT_DIR)/$(SAMPLE_ID).log 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err; rm $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp
+#COMMAND_CLIP_ADAPTER ?= $(COMMAND_CONVERT_SRA) > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp; $(FASTX_CLIP_EXE) $(FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE) -Q$(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).qualityEncoding) -a $(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq) -l $(MIN_READ_LENGTH) -v -n -M $(MIN_ADAPTER_BASES_3p) -i $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp -z -o $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz >> $(OUTPUT_DIR)/$(SAMPLE_ID).log 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err; rm $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.fastq.tmp
 
 
+COMMAND_CLIP_ADAPTER ?= $(COMMAND_CONVERT_SRA) > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.tmp.fastq; $(CUTADAPT_EXE) $(FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE) --quality-base=$(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).qualityEncoding) --adapter=$(shell cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).adapterSeq) --minimum-length=$(MIN_READ_LENGTH)  --max-n=1.0 --overlap=$(MIN_ADAPTER_BASES_3p) --error-rate=1 --output=$(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.tmp.fastq $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.tmp.fastq >> $(OUTPUT_DIR)/$(SAMPLE_ID).log 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err #; rm $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).preClipped.tmp.fastq
 
 ##
 ## Logic block to handle random adapter removal
@@ -324,17 +328,20 @@ else
 	BARCODE_STATS_COMMAND := 
 endif
 ifeq ($(RANDOM_BARCODE_LENGTH),0)
-	COMMAND_REMOVE_RANDOM_BARCODE := mv $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
+	#COMMAND_REMOVE_RANDOM_BARCODE := mv $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
+	COMMAND_REMOVE_RANDOM_BARCODE := mv $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.tmp.fastq $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq; gzip $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq
 	ENDOGENOUS_QUANT_RANDOM_BARCODE_STATS := 
 	FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE :=
 else
 	#COMMAND_REMOVE_RANDOM_BARCODE := gunzip -c $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz | $(JAVA_EXE) -Xmx$(JAVA_RAM) -jar $(EXCERPT_TOOLS_EXE) ProcessFastqWithRandomBarcode -n $(RANDOM_BARCODE_LENGTH) $(RANDOM_BARCODE_LOCATION) -stats $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.barcodeStats - 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).log | gzip -c > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
 	#ENDOGENOUS_QUANT_RANDOM_BARCODE_STATS := -randombarcode $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.barcodeStats
-	COMMAND_REMOVE_RANDOM_BARCODE := gunzip -c $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz | $(JAVA_EXE) -Xmx$(JAVA_RAM) -jar $(EXCERPT_TOOLS_EXE) ProcessFastqWithRandomBarcode -min $(MIN_READ_LENGTH) -n $(RANDOM_BARCODE_LENGTH) $(RANDOM_BARCODE_LOCATION) $(BARCODE_STATS_COMMAND) - 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).log | gzip -c > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
+	#COMMAND_REMOVE_RANDOM_BARCODE := gunzip -c $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.tmp.gz | $(JAVA_EXE) -Xmx$(JAVA_RAM) -jar $(EXCERPT_TOOLS_EXE) ProcessFastqWithRandomBarcode -min $(MIN_READ_LENGTH) -n $(RANDOM_BARCODE_LENGTH) $(RANDOM_BARCODE_LOCATION) $(BARCODE_STATS_COMMAND) - 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).log | gzip -c > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
+	COMMAND_REMOVE_RANDOM_BARCODE := cat $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.tmp.fastq | $(JAVA_EXE) -Xmx$(JAVA_RAM) -jar $(EXCERPT_TOOLS_EXE) ProcessFastqWithRandomBarcode -min $(MIN_READ_LENGTH) -n $(RANDOM_BARCODE_LENGTH) $(RANDOM_BARCODE_LOCATION) $(BARCODE_STATS_COMMAND) - 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).log | gzip -c > $(OUTPUT_DIR)/$(SAMPLE_ID)/$(SAMPLE_ID).clipped.fastq.gz
 	ENDOGENOUS_QUANT_RANDOM_BARCODE_STATS := 
 	#
 	# if we are using random barcodes, reads input to the pipeline MUST HAVE A 3' ADAPTER!
-	FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE := -c
+#	FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE := -c
+	FASTX_CLIP_COMMANDS_FOR_RANDOM_BARCODE := --discard-untrimmed
 endif
 
 
@@ -595,9 +602,11 @@ $(OUTDIR)/$(SAMPLE_ID).clipped.fastq.gz: $(OUTDIR)/$(SAMPLE_ID).qualityEncoding
 	$(COMMAND_CLIP_ADAPTER)
 	@echo -e "$(ts) $(PIPELINE_NAME): Finished removing adapters\n" >> $(OUTPUT_DIR)/$(SAMPLE_ID).log
 	## Count reads input to adapter clipping
-	grep "Input: " $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "input\t"$$2}' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
+	#grep "Input: " $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "input\t"$$2}' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
+	grep "^Total reads processed: " $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "input\t"$$4}' | sed 's/,//g' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
 	## Count reads output following adapter clipping
-	grep "Output: " $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "successfully_clipped\t"$$2}' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
+	#grep "Output: " $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "successfully_clipped\t"$$2}' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
+	grep "^Reads written (passing filters):" $(OUTPUT_DIR)/$(SAMPLE_ID).log | awk '{print "successfully_clipped\t"$$5}' | sed 's/,//g' >> $(OUTPUT_DIR)/$(SAMPLE_ID).stats
 	## Remove random barcodes if there are any
 	@echo -e "$(ts) $(PIPELINE_NAME): Removing $(RANDOM_BARCODE_LENGTH)N random barcode:\n" >> $(OUTPUT_DIR)/$(SAMPLE_ID).log 
 	@echo -e "$(ts) $(PIPELINE_NAME): $(COMMAND_REMOVE_RANDOM_BARCODE)\n" >> $(OUTPUT_DIR)/$(SAMPLE_ID).log 2>> $(OUTPUT_DIR)/$(SAMPLE_ID).err
